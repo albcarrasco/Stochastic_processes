@@ -1,0 +1,142 @@
+---
+title: "**Stochastic Processes for Sequence Analysis**"
+subtitle: "Assignment 2"
+author: "Guillermo Carrillo Martín & Alberto Carrasco Parrón"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    css: https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/all.css
+    self_contained: yes
+    theme: yeti
+  pdf_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 6, fig.height = 4, fig.align = "center")
+library(ggplot2)
+library(ggrepel)
+library(seqinr)
+library(rentrez)
+library(cowplot)
+library(HMM)
+library(HiddenMarkov)
+```
+
+# Download Zika virus (NC_012532.1) and Dengue virus (NC_001477).
+
+First of all, the sequence data contained in the NCBI Nucleotide
+database is obtained by using the `rentrez` library.
+
+```{r get-data}
+library(rentrez)
+library(seqinr)
+# Zika 
+zika_fasta <- rentrez::entrez_fetch(db = "nucleotide", id = "NC_012532.1", rettype = "fasta")
+write(zika_fasta, file =  "input/zika.fasta")
+zika <- read.fasta("input/zika.fasta")
+zika <- zika[[1]]
+
+# Dengue
+dengue_fasta <- rentrez::entrez_fetch(db = "nucleotide", id = "NC_001477", rettype = "fasta")
+write(dengue_fasta, file =  "input/dengue.fasta")
+dengue <- read.fasta("input/dengue.fasta")
+dengue <- dengue[[1]]
+```
+
+Some genomes have long stretches of either GC-rich or AT-rich sequence.
+Use a HMM with two different states ("AT-rich" and "GC-rich") to infer
+which state of the HMM is most likely to have generated each nucleotide
+position in Zika and Dengue sequences. In this case we exactly know the
+underlying HMM model, that is, for the AT-rich state, pA= 0.329, pc =
+0.301, pG = 0.159, and pT = 0.211; for the GC-rich state, pA = 0.181, pC
+= 0.313, pG = 0.307, and pT = 0.199. Moreover, the probability of
+switching from the AT-rich state to the GC-rich state, or conversely, is
+0.3. Make a plot for each virus in order to see the change points. Which
+of both viruses has more change points?
+
+```{r}
+# Build the HMM 
+hmm <- initHMM(c("ATr","GCr"), c("a","c","g","t"), c(0.5,0.5), 
+matrix(c(.7,.3,.3,.7),2), matrix(c(.329,.301,.159,.211, 
+.181,.313,.307,.199),2)) 
+
+# Zika
+path_zika <- viterbi(hmm, zika)
+x1 <- ifelse(path_zika=="ATr", 1, 0)
+c1 <- 0
+for (i in 1:(length(x1)-1)) {
+  print(x1[i])
+  if (x1[i] != x1[i+1]) {
+    c1 <- c1+1
+    }
+}
+ts.plot(x1)
+
+# Dengue
+path_dengue <- viterbi(hmm,dengue)
+x2 <- ifelse(path_dengue=="ATr", 1, 0)
+ts.plot(x2)
+```
+
+Calculate the GC content and the presence/absence of the trinucleotid
+"cct", of chunks with length 100 (for both viruses).
+
+```{r}
+n <- length(zika)
+m <- 100 # chunk size
+k <- n%/%100 # number of chunks (division only with ints)
+gcc <- numeric(k) #create a vector with k position (number of chunks)
+cct <- numeric(k)
+for (i in 1:k){
+  a <- (i-1)*m+1; b <- a+m+1
+  gcc[i] <- GC(zika[a:b])
+  cct[i] <- ifelse(count(zika[a:b],3)["cct"] > 0, 1, 0)
+}
+#ts.plot(cct)
+par(mar = c(5, 4, 4, 4) + 0.3) 
+zika_gc <- ts.plot(gcc, 
+                    xlab = "chunk",
+                    ylab= "GC content",
+                    col="#9437B8", 
+                    main = "Sliding window GC content analysis", 
+                    sub = "Chunk size = 100 bp",
+                    ylim= c(0.35, 0.65))
+par(new=TRUE)
+lines(cct,xlab="",ylab="", ylim= c(0, 5))
+axis(side=4, at=pretty(c(0,5)))
+mtext("z", side=4, line=3)
+
+n <- length(dengue)
+m <- 100 # window size
+k <- n%/%100 # number of chunks (division only with ints)
+gcc1 <- numeric(k) #create a vector with k position (number of chunks)
+for (i in 1:k){
+  a <- (i-1)*m+1; b <- a+m+1
+  gcc1[i] <- GC(dengue[a:b])
+}
+lines(gcc1, xlab = "chunk", ylab= "GC content", col="#225560")
+legend(50, 0.55, legend=c("zika", "dengue"), col = c("#F46036","#225560"), lty = 1, cex= 0.8)
+```
+
+
+
+
+
+Is there any significant relationship between the presence of “cct” and the GC
+content? Discuss and compare the results for both viruses.
+
+
+```{r}
+glm_zika <- glm(cct~gcc, family = binomial); glm_zika
+summary(glm_zika)
+```
+
+What is the probability of the presence of “cct” for a chunk with GC content of
+0.50 in Zika virus? What is this probability for Dengue virus? 
+
+```{r}
+(exp(-4.407+11.017*0.5)) / (1+exp(-4.407+11.017*0.5))
+```
